@@ -83,6 +83,10 @@ class RecGui(tk.Tk):
             #                            suffix='.wav', dir='')
 
 
+# TODO: create a thread for writing to file (read from queue until None is received)
+# TODO: open file with certain buffer setting?
+# TODO: wait (using after()) until writing thread not is_alive()
+
 
 
 def main():
