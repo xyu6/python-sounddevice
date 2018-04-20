@@ -1,38 +1,54 @@
 #!/usr/bin/env python3
 
+import queue
 import sys
+import tempfile
+import threading
 import tkinter as tk
 from tkinter import ttk
 
-# TODO: import numpy?
+import numpy as np
 import sounddevice as sd
+import soundfile as sf
+
+
+class FileWritingThread(threading.Thread):
+
+    def __init__(self, *, q, **soundfile_args):
+        super().__init__()
+        self.soundfile_args = soundfile_args
+        self.q = q
+
+    def run(self):
+        with sf.SoundFile(**self.soundfile_args) as f:
+            while True:
+                data = self.q.get()
+                if data is None:
+                    break
+                f.write(data)
 
 
 class RecGui(tk.Tk):
-    """
-    """
 
     def __init__(self):
         tk.Tk.__init__(self)
 
         self.title('Recording GUI')
+
+        self.recording = self._previously_recording = False
+
         # We try to open a stream with default settings first, if that doesn't
         # work, the user can manually change the device(s)
 
-        # TODO: raw stream?
-        self.stream = sd.InputStream(callback=self.callback)
-        # TODO: try/catch around stream creation
-        # TODO: if Stream doesn't work try InputStream?
-        # TODO: re-usable method for stream creation?
-
-        self.rec_button = ttk.Button(text='rec', command=self.on_rec_button)
+        self.rec_button = ttk.Button()
         self.rec_button.pack()
 
-        # TODO: change button to "stop" when pressed
+        # TODO: bright red button, blinking?
 
-        # TODO: red button, blinking?
-
-        # TODO: open file already?
+        self.settings_button = ttk.Button(
+            text='device settings', command=self.on_settings)
+        # TODO: both buttons in a row
+        self.settings_button.pack()
 
         self.file_label = ttk.Label(text='<file name>')
         self.file_label.pack()
@@ -41,52 +57,101 @@ class RecGui(tk.Tk):
 
         # TODO: show xruns?
 
-        # TODO: start stream 
-        # TODO: activate rec button if stream is available
+        self.stream = sd.InputStream(channels=1, callback=self.callback)
+        # TODO: try/catch around stream creation
+        self.samplerate = int(self.stream.samplerate)
+        self.channels = 1
+        self.stream.start()
+        # TODO: re-usable method for stream creation?
 
+        self.thread = None
+        self.audio_q = queue.Queue()
+
+        self.init_buttons()
+        self.protocol('WM_DELETE_WINDOW', self.close_window)
 
     # TODO: GUI for selecting device and WAV subtype
-    # TODO: button for device settings (channels=1? channel selection?)
+    # TODO: channels=1? channel selection?
     #       List with radio buttons (or drop-down?) for device selection
     #       List with checkboxes for channel selection (+ (un)select all)
     #       scrollable!
     #       available sample rates?
 
-    def callback(self, indata, outdata, frames, time, status):
+    def callback(self, indata, frames, time, status):
         """This is called (from a separate thread) for each audio block."""
         if status:
+            # TODO: accumulate numbers and show in GUI?
             print(status, file=sys.stderr)
-        # TODO: thread-safe check for button states!
-        # TODO: check if recording, if yes put data into queue
-        #q.put(indata.copy())
-        # TODO: check if playing back, if yes read from buffer (or queue?)
-
-    # TODO: def start_recording(self):
-    # TODO: is file already open?
-
-    # TODO: def stop_recording(self):
-    # TODO: close file
-
-    def on_rec_button(self, *args):
-        print('rec button:', args)
-        # TODO: open/close file?
-        # TODO: set recording state
-        if recording:
-            # TODO: stop recording
-            # TODO: change button text (and style?)
+        # NB: self.recording is accessed from different threads.
+        #     This is safe because here we are only accessing it once (with a
+        #     single bytecode instruction).
+        if self.recording:
+            self.audio_q.put(indata.copy())
+            self._previously_recording = True
         else:
-            # TODO: start recording
-            # TODO: change button text (and style?)
-            # TODO: create file writing thread
-            # NB: file creation might fail
-            #filename = tempfile.mktemp(prefix='rec_gui_',
-            #                            suffix='.wav', dir='')
+            if self._previously_recording:
+                self.audio_q.put(None)
+                self._previously_recording = False
 
+        # TODO: get RMS (or peak?) value, put it in 1-element queue
 
-# TODO: create a thread for writing to file (read from queue until None is received)
-# TODO: open file with certain buffer setting?
-# TODO: wait (using after()) until writing thread not is_alive()
+    def on_rec(self):
+        self.settings_button['state'] = 'disabled'
+        self.recording = True
 
+        filename = tempfile.mktemp(
+            prefix='delme_rec_gui_', suffix='.wav', dir='')
+
+        if self.audio_q.qsize() != 0:
+            print('WARNING: Queue not empty!')
+        self.thread = FileWritingThread(
+            file=filename,
+            mode='x',
+            samplerate=self.samplerate,
+            channels=self.channels,
+            q=self.audio_q,
+        )
+        self.thread.start()
+
+        # NB: File creation might fail!  For brevity, we don't check for this.
+
+        self.rec_button['text'] = 'stop'
+        self.rec_button['command'] = self.on_stop
+        self.rec_button['state'] = 'normal'
+        # TODO: change button style?
+        self.file_label['text'] = filename
+
+    def on_stop(self, *args):
+        self.rec_button['state'] = 'disabled'
+        self.recording = False
+        self.wait_for_thread()
+
+    def wait_for_thread(self):
+        # NB: Waiting time could be calculated based on stream.latency
+        self.after(10, self._wait_for_thread)
+
+    def _wait_for_thread(self):
+        if self.thread.is_alive():
+            self.wait_for_thread()
+            return
+        self.thread.join()
+        self.init_buttons()
+
+    def on_settings(self, *args):
+        print('settings not yet implemented')
+
+    def init_buttons(self):
+        self.rec_button['text'] = 'rec'
+        self.rec_button['command'] = self.on_rec
+        # TODO: set button style?
+        if self.stream:
+            self.rec_button['state'] = 'normal'
+        self.settings_button['state'] = 'normal'
+
+    def close_window(self):
+        if self.recording:
+            self.on_stop()
+        self.destroy()
 
 
 def main():
