@@ -12,20 +12,17 @@ import sounddevice as sd
 import soundfile as sf
 
 
-class FileWritingThread(threading.Thread):
-
-    def __init__(self, *, q, **soundfile_args):
-        super().__init__()
-        self.soundfile_args = soundfile_args
-        self.q = q
-
-    def run(self):
-        with sf.SoundFile(**self.soundfile_args) as f:
-            while True:
-                data = self.q.get()
-                if data is None:
-                    break
-                f.write(data)
+def file_writing_thread(*, q, **soundfile_args):
+    """Write data from queue to file until *None* is recieved."""
+    # NB: If you want fine-grained control about the buffering of the file, you
+    #     can use Python's open() function (with the "buffering" argument) and
+    #     pass the resulting file object to sf.SoundFile().
+    with sf.SoundFile(**soundfile_args) as f:
+        while True:
+            data = q.get()
+            if data is None:
+                break
+            f.write(data)
 
 
 class RecGui(tk.Tk):
@@ -35,19 +32,15 @@ class RecGui(tk.Tk):
 
         self.title('Recording GUI')
 
-        self.recording = self._previously_recording = False
-
         # We try to open a stream with default settings first, if that doesn't
         # work, the user can manually change the device(s)
 
         self.rec_button = ttk.Button()
         self.rec_button.pack()
 
-        # TODO: bright red button, blinking?
-
         self.settings_button = ttk.Button(
             text='device settings', command=self.on_settings)
-        # TODO: both buttons in a row
+        # TODO: both buttons in a row, some margin
         self.settings_button.pack()
 
         self.file_label = ttk.Label(text='<file name>')
@@ -55,7 +48,16 @@ class RecGui(tk.Tk):
 
         # TODO: meters?
 
-        # TODO: show xruns?
+        self.status_label = ttk.Label(text='input overflows: 0')
+        # TODO: left-align?
+        self.status_label.pack()
+
+        self.meter = ttk.Progressbar()
+        self.meter['orient'] = 'horizontal'
+        self.meter['mode'] = 'determinate'
+        self.meter['maximum'] = 100
+        self.meter['value'] = 25
+        self.meter.pack(fill='x')
 
         self.stream = sd.InputStream(channels=1, callback=self.callback)
         # TODO: try/catch around stream creation
@@ -64,8 +66,9 @@ class RecGui(tk.Tk):
         self.stream.start()
         # TODO: re-usable method for stream creation?
 
-        self.thread = None
+        self.recording = self._previously_recording = False
         self.audio_q = queue.Queue()
+        self.status_q = queue.Queue(maxsize=1)
 
         self.init_buttons()
         self.protocol('WM_DELETE_WINDOW', self.close_window)
@@ -104,12 +107,15 @@ class RecGui(tk.Tk):
 
         if self.audio_q.qsize() != 0:
             print('WARNING: Queue not empty!')
-        self.thread = FileWritingThread(
-            file=filename,
-            mode='x',
-            samplerate=self.samplerate,
-            channels=self.channels,
-            q=self.audio_q,
+        self.thread = threading.Thread(
+            target=file_writing_thread,
+            kwargs=dict(
+                file=filename,
+                mode='x',
+                samplerate=self.samplerate,
+                channels=self.channels,
+                q=self.audio_q,
+            ),
         )
         self.thread.start()
 
