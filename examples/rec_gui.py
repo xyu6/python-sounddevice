@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Simple GUI for recording into a WAV file.
 
-There are 3 concurrent activities: GUI, audio callback, file-writing thread
+There are 3 concurrent activities: GUI, audio callback, file-writing thread.
 
 Neither the GUI nor the audio callback is supposed to block.
 Blocking in any of the GUI functions could make the GUI "freeze", blocking in
@@ -42,71 +42,84 @@ class RecGui(tk.Tk):
 
         self.title('Recording GUI')
 
-        # We try to open a stream with default settings first, if that doesn't
-        # work, the user can manually change the device(s)
+        padding = 10
 
-        self.rec_button = ttk.Button()
-        self.rec_button.pack()
+        f = ttk.Frame()
+
+        self.rec_button = ttk.Button(f)
+        self.rec_button.pack(side='left', padx=padding, pady=padding)
 
         self.settings_button = ttk.Button(
-            text='device settings', command=self.on_settings)
-        # TODO: both buttons in a row, some margin
-        self.settings_button.pack()
+            f, text='settings', command=self.on_settings)
+        self.settings_button.pack(side='left', padx=padding, pady=padding)
+
+        f.pack(expand=True, padx=padding, pady=padding)
 
         self.file_label = ttk.Label(text='<file name>')
-        self.file_label.pack()
+        self.file_label.pack(anchor='w')
 
-        # TODO: meters?
+        self.input_overflows = 0
+        self.status_label = ttk.Label()
+        self.status_label.pack(anchor='w')
 
-        self.status_label = ttk.Label(text='input overflows: 0')
-        # TODO: left-align?
-        self.status_label.pack()
-
+        # TODO: one meter per channel?
         self.meter = ttk.Progressbar()
         self.meter['orient'] = 'horizontal'
         self.meter['mode'] = 'determinate'
-        self.meter['maximum'] = 100
-        self.meter['value'] = 25
+        # TODO: decibel
+        self.meter['maximum'] = 1.0
         self.meter.pack(fill='x')
 
-        self.stream = sd.InputStream(channels=1, callback=self.callback)
+        # We try to open a stream with default settings first, if that doesn't
+        # work, the user can manually change the device(s)
+
+        self.stream = sd.InputStream(channels=1, callback=self.audio_callback)
         # TODO: try/catch around stream creation
         self.samplerate = int(self.stream.samplerate)
         self.channels = 1
         self.stream.start()
         # TODO: re-usable method for stream creation?
 
-        self.recording = self._previously_recording = False
+        self.recording = self.previously_recording = False
         self.audio_q = queue.Queue()
-        self.status_q = queue.Queue(maxsize=1)
+        self.peak = 0
+        self.metering_q = queue.Queue(maxsize=1)
 
-        self.init_buttons()
         self.protocol('WM_DELETE_WINDOW', self.close_window)
+        self.init_buttons()
+        self.update_gui()
 
-    # TODO: GUI for selecting device and WAV subtype
+    # TODO: GUI for selecting device (and WAV subtype?)
     # TODO: channels=1? channel selection?
     #       List with radio buttons (or drop-down?) for device selection
     #       List with checkboxes for channel selection (+ (un)select all)
     #       scrollable!
     #       available sample rates?
 
-    def callback(self, indata, frames, time, status):
+    def audio_callback(self, indata, frames, time, status):
         """This is called (from a separate thread) for each audio block."""
-        if status:
-            # TODO: accumulate numbers and show in GUI?
-            print(status, file=sys.stderr)
+        if status.input_overflow:
+            # NB: This increment operation is not atomic, but this doesn't
+            #     matter since no other thread is writing to the attribute.
+            self.input_overflows += 1
         # NB: self.recording is accessed from different threads.
         #     This is safe because here we are only accessing it once (with a
         #     single bytecode instruction).
         if self.recording:
             self.audio_q.put(indata.copy())
-            self._previously_recording = True
+            self.previously_recording = True
         else:
-            if self._previously_recording:
+            if self.previously_recording:
                 self.audio_q.put(None)
-                self._previously_recording = False
+                self.previously_recording = False
 
-        # TODO: get RMS (or peak?) value, put it in 1-element queue
+        self.peak = max(self.peak, np.max(np.abs(indata)))
+        try:
+            self.metering_q.put_nowait(self.peak)
+        except queue.Full:
+            pass
+        else:
+            self.peak = 0
 
     def on_rec(self):
         self.settings_button['state'] = 'disabled'
@@ -157,12 +170,25 @@ class RecGui(tk.Tk):
         print('settings not yet implemented')
 
     def init_buttons(self):
-        self.rec_button['text'] = 'rec'
+        self.rec_button['text'] = 'record'
         self.rec_button['command'] = self.on_rec
         # TODO: set button style?
         if self.stream:
             self.rec_button['state'] = 'normal'
         self.settings_button['state'] = 'normal'
+
+    def update_gui(self):
+        self.status_label['text'] = 'input overflows: {}'.format(
+            self.input_overflows)
+        try:
+            peak = self.metering_q.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            # TODO: decibel
+            self.meter['value'] = peak
+        # TODO: configurable refresh rate
+        self.after(100, self.update_gui)
 
     def close_window(self):
         if self.recording:
