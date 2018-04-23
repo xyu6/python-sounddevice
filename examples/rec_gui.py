@@ -1,5 +1,15 @@
 #!/usr/bin/env python3
+"""Simple GUI for recording into a WAV file.
 
+There are 3 concurrent activities: GUI, audio callback, file-writing thread
+
+Neither the GUI nor the audio callback is supposed to block.
+Blocking in any of the GUI functions could make the GUI "freeze", blocking in
+the audio callback could lead to drop-outs in the recording.
+Blocking the file-writing thread for some time is no problem, as long as the
+recording can be stopped successfully when it is supposed to.
+
+"""
 import queue
 import sys
 import tempfile
