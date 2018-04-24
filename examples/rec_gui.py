@@ -16,6 +16,7 @@ import tempfile
 import threading
 import tkinter as tk
 from tkinter import ttk
+from tkinter.simpledialog import Dialog
 
 import numpy as np
 import sounddevice as sd
@@ -33,6 +34,27 @@ def file_writing_thread(*, q, **soundfile_args):
             if data is None:
                 break
             f.write(data)
+
+
+class SettingsWindow(Dialog):
+    """
+    """
+
+    def body(self, master):
+        ttk.Label(master, text='Select sound device:').pack(anchor='w')
+        device_list = ttk.Combobox(master)
+        device_list.pack()
+        device_list['values'] = 'a', 'b', 'c'
+        # TODO: select default device (if available)
+        device_list.current(0)
+
+    def validate(self):
+        print('validate')
+        return True
+
+    def apply(self):
+        print('after destruction')
+        self.result = 77
 
 
 class RecGui(tk.Tk):
@@ -167,7 +189,8 @@ class RecGui(tk.Tk):
         self.init_buttons()
 
     def on_settings(self, *args):
-        print('settings not yet implemented')
+        w = SettingsWindow(self, 'Settings')
+        print(w.result)
 
     def init_buttons(self):
         self.rec_button['text'] = 'record'
