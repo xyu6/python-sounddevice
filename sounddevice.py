@@ -2548,17 +2548,18 @@ def _get_device_id(id_or_query_string, kind, raise_on_error=False):
 
 def _initialize():
     """Initialize PortAudio."""
-    _pa.initialize()
+    global _pa
+    _pa = _lowlevel.PortAudio()
 
 
 def _terminate():
     """Terminate PortAudio."""
+    global _pa
     _pa.terminate()
+    _pa = None
 
 
 def _exit_handler():
-    assert _initialized >= 0
-
     # We cleanup any open streams here since older versions of portaudio don't
     # manage this (see github issue #1)
     if _last_callback:
@@ -2566,14 +2567,14 @@ def _exit_handler():
         # calling close()
         _last_callback.stream.stop()
         _last_callback.stream.close()
-
-    while _initialized:
-        _terminate()
+    if _pa:
+        _pa.terminate()
 
 
 _lowlevel.ignore_stderr()
-#_atexit.register(_exit_handler)
-_pa = _lowlevel.PortAudio()
+_atexit.register(_exit_handler)
+_initialize()
+
 
 
 class MyStream(_lowlevel._MyStream):

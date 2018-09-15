@@ -32,8 +32,6 @@ except NameError:
 
 class PortAudio(object):
 
-    initialized = 0
-
     def __init__(self, libname=None):
         #if libname:
         #    self.libname = libname
@@ -72,7 +70,7 @@ class PortAudio(object):
             'int8': self._lib.paInt8,
             'uint8': self._lib.paUInt8,
         }
-        self.initialize()
+        self.check(self._lib.Pa_Initialize(), 'Error initializing PortAudio')
 
         pa = self
 
@@ -83,13 +81,9 @@ class PortAudio(object):
 
         self.MyOtherStream = MyOtherStream
 
-    def initialize(self):
-        self.check(self._lib.Pa_Initialize(), 'Error initializing PortAudio')
-        self.initialized += 1
-
     def terminate(self):
+        # TODO: allow multiple calls?
         self.check(self._lib.Pa_Terminate(), 'Error terminating PortAudio')
-        self.initialized -= 1
 
     def check(self, err, msg=''):
         """Raise PortAudioError for below-zero error codes."""
