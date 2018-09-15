@@ -67,7 +67,7 @@ else:
 setup(
     name='sounddevice',
     version=__version__,
-    py_modules=['sounddevice'],
+    py_modules=['sounddevice', 'sounddevice_lowlevel'],
     packages=packages,
     package_data=package_data,
     zip_safe=zip_safe,

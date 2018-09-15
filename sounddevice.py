@@ -52,52 +52,12 @@ __version__ = '0.3.12'
 
 import atexit as _atexit
 import os as _os
-import platform as _platform
 import sys as _sys
-from ctypes.util import find_library as _find_library
-from _sounddevice import ffi as _ffi
+
+import sounddevice_lowlevel as _lowlevel
 
 
-try:
-    for _libname in (
-            'portaudio',  # Default name on POSIX systems
-            'bin\\libportaudio-2.dll',  # DLL from conda-forge
-            'lib/libportaudio.dylib',  # dylib from anaconda
-            ):
-        _libname = _find_library(_libname)
-        if _libname is not None:
-            break
-    else:
-        raise OSError('PortAudio library not found')
-    _lib = _ffi.dlopen(_libname)
-except OSError:
-    if _platform.system() == 'Darwin':
-        _libname = 'libportaudio.dylib'
-    elif _platform.system() == 'Windows':
-        _libname = 'libportaudio' + _platform.architecture()[0] + '.dll'
-    else:
-        raise
-    import _sounddevice_data
-    _libname = _os.path.join(
-        next(iter(_sounddevice_data.__path__)), 'portaudio-binaries', _libname)
-    _lib = _ffi.dlopen(_libname)
-
-_sampleformats = {
-    'float32': _lib.paFloat32,
-    'int32': _lib.paInt32,
-    'int24': _lib.paInt24,
-    'int16': _lib.paInt16,
-    'int8': _lib.paInt8,
-    'uint8': _lib.paUInt8,
-}
-
-_initialized = 0
 _last_callback = None
-
-try:
-    _basestring = basestring
-except NameError:
-    _basestring = str, bytes
 
 
 def play(data, samplerate=None, mapping=None, blocking=False, loop=False,
@@ -810,7 +770,7 @@ class _StreamBase(object):
                                                      self._finished_callback))
 
     # Avoid confusion if something goes wrong before assigning self._ptr:
-    _ptr = _ffi.NULL
+    #_ptr = _ffi.NULL
 
     @property
     def samplerate(self):
@@ -1966,7 +1926,7 @@ class default(object):
     :func:`query_devices`
 
     """
-    blocksize = _lib.paFramesPerBufferUnspecified
+    #blocksize = _lib.paFramesPerBufferUnspecified
     """See the *blocksize* argument of `Stream`."""
     clip_off = False
     """Disable clipping.
@@ -2036,38 +1996,9 @@ class default(object):
         self.__init__()
 
 
-if not hasattr(_ffi, 'I_AM_FAKE'):
-    # This object shadows the 'default' class, except when building the docs.
-    default = default()
-
-
-class PortAudioError(Exception):
-    """This exception will be raised on PortAudio errors.
-
-    Attributes
-    ----------
-    args
-        A variable length tuple containing the following elements when
-        available:
-
-        1) A string describing the error
-        2) The PortAudio ``PaErrorCode`` value
-        3) A 3-tuple containing the host API index, host error code, and the
-           host error message (which may be an empty string)
-
-    """
-
-    def __str__(self):
-        errormsg = self.args[0] if self.args else ''
-        if len(self.args) > 1:
-            errormsg = "{0} [PaErrorCode {1}]".format(errormsg, self.args[1])
-        if len(self.args) > 2:
-            host_api, hosterror_code, hosterror_text = self.args[2]
-            hostname = query_hostapis(host_api)['name']
-            errormsg = "{0}: '{1}' [{2} error {3}]".format(
-                errormsg, hosterror_text, hostname, hosterror_code)
-
-        return errormsg
+#if not hasattr(_ffi, 'I_AM_FAKE'):
+#    # This object shadows the 'default' class, except when building the docs.
+#    default = default()
 
 
 class CallbackStop(Exception):
@@ -2549,29 +2480,6 @@ def _split(value):
     return invalue, outvalue
 
 
-def _check(err, msg=''):
-    """Raise PortAudioError for below-zero error codes."""
-    if err >= 0:
-        return err
-
-    errormsg = _ffi.string(_lib.Pa_GetErrorText(err)).decode()
-    if msg:
-        errormsg = "{0}: {1}".format(msg, errormsg)
-
-    if err == _lib.paUnanticipatedHostError:
-        # (gh82) We grab the host error info here rather than inside
-        # PortAudioError since _check should only ever be called after a
-        # failing API function call. This way we can avoid any potential issues
-        # in scenarios where multiple APIs are being used simultaneously.
-        info = _lib.Pa_GetLastHostErrorInfo()
-        host_api = _lib.Pa_HostApiTypeIdToHostApiIndex(info.hostApiType)
-        hosterror_text = _ffi.string(info.errorText).decode()
-        hosterror_info = host_api, info.errorCode, hosterror_text
-        raise PortAudioError(errormsg, err, hosterror_info)
-
-    raise PortAudioError(errormsg, err)
-
-
 def _get_device_id(id_or_query_string, kind, raise_on_error=False):
     """Return device ID given space-separated substrings."""
     assert kind in ('input', 'output', None)
@@ -2640,16 +2548,12 @@ def _get_device_id(id_or_query_string, kind, raise_on_error=False):
 
 def _initialize():
     """Initialize PortAudio."""
-    global _initialized
-    _check(_lib.Pa_Initialize(), 'Error initializing PortAudio')
-    _initialized += 1
+    _pa.initialize()
 
 
 def _terminate():
     """Terminate PortAudio."""
-    global _initialized
-    _check(_lib.Pa_Terminate(), 'Error terminating PortAudio')
-    _initialized -= 1
+    _pa.terminate()
 
 
 def _exit_handler():
@@ -2667,25 +2571,16 @@ def _exit_handler():
         _terminate()
 
 
-def _ignore_stderr():
-    """Try to forward PortAudio messages from stderr to /dev/null."""
-    try:
-        stdio = _ffi.dlopen(None)
-        devnull = stdio.fopen(_os.devnull.encode(), b'w')
-    except (OSError, AttributeError):
-        return
-    try:
-        stdio.stderr = devnull
-    except _ffi.error:
-        try:
-            stdio.__stderrp = devnull
-        except _ffi.error:
-            stdio.fclose(devnull)
+_lowlevel.ignore_stderr()
+#_atexit.register(_exit_handler)
+_pa = _lowlevel.PortAudio()
 
 
-_ignore_stderr()
-_atexit.register(_exit_handler)
-_initialize()
+class MyStream(_lowlevel._MyStream):
+
+    def __init__(self, *args, **kwargs):
+        _lowlevel._MyStream.__init__(self, *args, lib=_pa._lib, **kwargs)
+
 
 if __name__ == '__main__':
     print(query_devices())
