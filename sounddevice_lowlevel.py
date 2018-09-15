@@ -35,10 +35,9 @@ class PortAudio(object):
     initialized = 0
 
     def __init__(self, libname=None):
-        if libname:
-            self.libname = libname
-            # TODO: implement this
-            return
+        #if libname:
+        #    self.libname = libname
+        #    # TODO: implement this
         try:
             for self.libname in (
                     'portaudio',  # Default name on POSIX systems
@@ -74,6 +73,15 @@ class PortAudio(object):
             'uint8': self._lib.paUInt8,
         }
         self.initialize()
+
+        pa = self
+
+        class MyOtherStream(_MyStream):
+
+            def __init__(self):
+                _MyStream.__init__(self, lib=pa._lib)
+
+        self.MyOtherStream = MyOtherStream
 
     def initialize(self):
         self.check(self._lib.Pa_Initialize(), 'Error initializing PortAudio')

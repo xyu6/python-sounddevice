@@ -2582,5 +2582,9 @@ class MyStream(_lowlevel._MyStream):
         _lowlevel._MyStream.__init__(self, *args, lib=_pa._lib, **kwargs)
 
 
+class MyOtherStream(_pa.MyOtherStream):
+    pass
+
+
 if __name__ == '__main__':
     print(query_devices())
